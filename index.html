@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTA V Térkép & Jegyzettömb</title>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: #1e293b;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            border-bottom: 2px solid #334155;
+            z-index: 1000;
+        }
+
+        .tabs-container {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            flex-grow: 1;
+            padding-bottom: 2px;
+        }
+
+        .tab {
+            background-color: #334155;
+            color: #cbd5e1;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            white-space: nowrap;
+            user-select: none;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            background-color: #475569;
+            color: #fff;
+        }
+
+        .tab.active {
+            background-color: #2563eb;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .tab .close-tab {
+            font-size: 12px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tab .close-tab:hover {
+            background: #ef4444;
+        }
+
+        .btn-add-tab {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        .btn-add-tab:hover {
+            background-color: #059669;
+        }
+
+        /* Rangválasztó konténer */
+        .role-container {
+            display: flex;
+            align-items: center;
+            background-color: #0f172a;
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+
+        .role-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .role-btn.active-editor {
+            background-color: #ef4444;
+            color: #ffffff;
+        }
+
+        .role-btn.active-viewer {
+            background-color: #3b82f6;
+            color: #ffffff;
+        }
+
+        #map {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+            background-color: #0fa8d7;
+        }
+
+        .leaflet-tooltip {
+            background-color: rgba(15, 23, 42, 0.9) !important;
+            color: #ffffff !important;
+            border: 1px solid #3b82f6 !important;
+            border-radius: 6px !important;
+            padding: 8px 12px !important;
+            font-size: 13px !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5) !important;
+            white-space: pre-wrap !important;
+            max-width: 250px;
+        }
+
+        .leaflet-tooltip-top:before {
+            border-top-color: #3b82f6 !important;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="tabs-container" id="tabsContainer"></div>
+        <button class="btn-add-tab" id="addTabBtn" onclick="createNewTab()">+ Új Lap</button>
+        
+        <div class="role-container">
+            <button class="role-btn active-viewer" id="btnViewer" onclick="setRole('viewer')">👁️ Olvasó</button>
+            <button class="role-btn" id="btnEditor" onclick="setRole('editor')">✏️ Szerkesztő</button>
+        </div>
+    </header>
+
+    <div id="map"></div>
+
+    <script>
+        // Beállított jelszó a szerkesztő módhoz
+        const EDITOR_PASSWORD = "admin123";
+        let currentRole = "viewer"; // Alapértelmezett mód: Olvasó
+
+        const MAP_WIDTH = 8192;
+        const MAP_HEIGHT = 8192;
+        const bounds = [[0, 0], [MAP_HEIGHT, MAP_WIDTH]];
+
+        const map = L.map('map', {
+            crs: L.CRS.Simple,
+            minZoom: -3,
+            maxZoom: 2,
+            maxBounds: bounds,
+            maxBoundsViscosity: 0.8
+        });
+
+        const imageUrl = 'https://external-preview.redd.it/gta-5-convenience-store-map-8192x8192px-v0-0nTvnPJEbEVxW1H17JU4GkHJz2oLDdUhb9CmQbffEZ8.jpeg?width=1080&crop=smart&auto=webp&s=f4db04a75a6bc4ec7be92618a91d09d039411233';
+        L.imageOverlay(imageUrl, bounds).addTo(map);
+
+        map.fitBounds(bounds);
+
+        let appData = JSON.parse(localStorage.getItem('gtav_map_data')) || {
+            activeTabId: 'default',
+            tabs: [
+                { id: 'default', name: 'Fő Térkép', pins: [] }
+            ]
+        };
+
+        let currentMarkers = [];
+
+        function saveData() {
+            localStorage.setItem('gtav_map_data', JSON.stringify(appData));
+        }
+
+        // Mód váltása (Jelszó ellenőrzéssel)
+        function setRole(role) {
+            if (role === 'editor' && currentRole !== 'editor') {
+                const password = prompt("Add meg a szerkesztői jelszót:");
+                if (password === EDITOR_PASSWORD) {
+                    currentRole = 'editor';
+                    updateRoleUI();
+                    renderTabs();
+                    alert("Sikeres bejelentkezés Szerkesztőként!");
+                } else if (password !== null) {
+                    alert("Hibás jelszó!");
+                }
+            } else if (role === 'viewer') {
+                currentRole = 'viewer';
+                updateRoleUI();
+                renderTabs();
+            }
+        }
+
+        function updateRoleUI() {
+            const btnViewer = document.getElementById('btnViewer');
+            const btnEditor = document.getElementById('btnEditor');
+            const addTabBtn = document.getElementById('addTabBtn');
+
+            if (currentRole === 'editor') {
+                btnEditor.className = 'role-btn active-editor';
+                btnViewer.className = 'role-btn';
+                addTabBtn.style.display = 'inline-block';
+            } else {
+                btnViewer.className = 'role-btn active-viewer';
+                btnEditor.className = 'role-btn';
+                addTabBtn.style.display = 'none';
+            }
+        }
+
+        function renderTabs() {
+            const container = document.getElementById('tabsContainer');
+            container.innerHTML = '';
+
+            appData.tabs.forEach(tab => {
+                const tabEl = document.createElement('div');
+                tabEl.className = `tab ${tab.id === appData.activeTabId ? 'active' : ''}`;
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.textContent = tab.name;
+                titleSpan.onclick = () => switchTab(tab.id);
+                tabEl.appendChild(titleSpan);
+
+                // Csak Szerkesztő módban jelenik meg a törlés gomb
+                if (currentRole === 'editor' && appData.tabs.length > 1) {
+                    const closeBtn = document.createElement('span');
+                    closeBtn.className = 'close-tab';
+                    closeBtn.innerHTML = '&times;';
+                    closeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteTab(tab.id);
+                    };
+                    tabEl.appendChild(closeBtn);
+                }
+
+                container.appendChild(tabEl);
+            });
+        }
+
+        function loadCurrentTabPins() {
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentMarkers = [];
+
+            const currentTab = appData.tabs.find(t => t.id === appData.activeTabId);
+            if (!currentTab) return;
+
+            currentTab.pins.forEach(pin => {
+                addMarkerToMap(pin);
+            });
+        }
+
+        function addMarkerToMap(pin) {
+            const marker = L.marker([pin.lat, pin.lng]).addTo(map);
+
+            marker.bindTooltip(pin.note, {
+                permanent: false,
+                direction: 'top',
+                offset: [0, -20]
+            });
+
+            // Jobb klikk törlés csak Szerkesztő módban működik
+            marker.on('contextmenu', () => {
+                if (currentRole !== 'editor') return;
+
+                if (confirm("Biztosan törölni szeretnéd ezt a pint?")) {
+                    map.removeLayer(marker);
+                    const currentTab = appData.tabs.find(t => t.id === appData.activeTabId);
+                    currentTab.pins = currentTab.pins.filter(p => p.id !== pin.id);
+                    saveData();
+                }
+            });
+
+            currentMarkers.push(marker);
+        }
+
+        // Új pin lerakása kattintásra (Csak Szerkesztő módban)
+        map.on('click', (e) => {
+            if (currentRole !== 'editor') return;
+
+            const note = prompt("Írj jegyzetet ehhez a ponthoz:");
+            if (note && note.trim() !== "") {
+                const newPin = {
+                    id: Date.now().toString(),
+                    lat: e.latlng.lat,
+                    lng: e.latlng.lng,
+                    note: note.trim()
+                };
+
+                const currentTab = appData.tabs.find(t => t.id === appData.activeTabId);
+                currentTab.pins.push(newPin);
+                saveData();
+
+                addMarkerToMap(newPin);
+            }
+        });
+
+        function createNewTab() {
+            if (currentRole !== 'editor') return;
+
+            const name = prompt("Add meg az új lap nevét:", "Új lap");
+            if (name && name.trim() !== "") {
+                const newTab = {
+                    id: Date.now().toString(),
+                    name: name.trim(),
+                    pins: []
+                };
+                appData.tabs.push(newTab);
+                appData.activeTabId = newTab.id;
+                saveData();
+                renderTabs();
+                loadCurrentTabPins();
+            }
+        }
+
+        function switchTab(tabId) {
+            appData.activeTabId = tabId;
+            saveData();
+            renderTabs();
+            loadCurrentTabPins();
+        }
+
+        function deleteTab(tabId) {
+            if (currentRole !== 'editor') return;
+
+            if (confirm("Biztosan törlöd ezt a lapot az összes rajta lévő pinnel együtt?")) {
+                appData.tabs = appData.tabs.filter(t => t.id !== tabId);
+                if (appData.activeTabId === tabId) {
+                    appData.activeTabId = appData.tabs[0].id;
+                }
+                saveData();
+                renderTabs();
+                loadCurrentTabPins();
+            }
+        }
+
+        // Kezdő beállítások betöltése
+        updateRoleUI();
+        renderTabs();
+        loadCurrentTabPins();
+    </script>
+</body>
+</html>
